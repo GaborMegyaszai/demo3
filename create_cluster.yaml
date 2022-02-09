@@ -1,0 +1,191 @@
+- hosts: kube_nodes
+  tasks:
+    - name: server update
+      apt:
+        update_cache: yes
+
+    - name: OS upgrade
+      apt:
+        upgrade: dist
+
+    - name: restart server
+      shell: systemctl reboot
+
+    - pause: seconds=30
+
+    - name: server update
+      apt:
+        update_cache: yes
+
+    - name: install basic packages
+      apt:
+        pkg:
+        - curl
+        - apt-transport-https
+        - vim
+        - git
+        - wget
+
+    - name: add Google repo
+      shell: curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+
+    - name: add GPG key
+      shell: echo "deb https://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+
+    - name: server update
+      apt:
+        update_cache: yes
+
+    - name: install kubernetes packages
+      apt:
+        pkg:
+        - kubelet
+        - kubeadm
+        - kubectl
+
+    - name: hold kubernetes packages
+      shell: apt-mark hold kubelet kubeadm kubectl
+
+    - name: disable swap
+      shell: sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab && swapoff -a
+
+    - name: Enable kernel modules and configure sysctl
+      shell: modprobe overlay && modprobe br_netfilter
+
+    - name: create kubernetes.conf
+      file:
+        path: /etc/sysctl.d/kubernetes.conf
+        state: touch
+        mode: u=rwx,g=rwx,o=rwx
+
+    - name: add bridge config to kubernetes.conf
+      blockinfile:
+        path: /etc/sysctl.d/kubernetes.conf
+        block: |
+          net.bridge.bridge-nf-call-ip6tables = 1
+          net.bridge.bridge-nf-call-iptables = 1
+          net.ipv4.ip_forward = 1
+
+    - name: Reload sysctl
+      shell: sysctl --system
+
+    - pause: seconds=30
+
+    - name: Update nodes
+      apt:
+        update_cache: yes
+
+    - name: install required packages
+      apt:
+        pkg:
+        - gnupg2
+        - software-properties-common
+        - ca-certificates
+
+    - name: add repository key
+      shell: curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+
+    - name: add repository
+      shell: add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+
+    - name: Update nodes
+      apt:
+        update_cache: yes
+
+    - name: install Docker as container runtime
+      apt:
+        pkg: containerd.io docker-ce docker-ce-cli
+
+    - name: create docker.service.d directory
+      file:
+        path: /etc/systemd/system/docker.service.d
+        state: directory
+        mode: 0755
+
+    - name: create Docker dameon JSON
+      file:
+        path: /etc/docker/daemon.json
+        state: touch
+        mode: u=rwx,g=rwx,o=rwx
+
+    - name: add cgroupdriver config
+      blockinfile:
+        path: /etc/docker/daemon.json
+        block: |
+          {
+            "exec-opts": ["native.cgroupdriver=systemd"],
+            "log-driver": "json-file",
+            "log-opts": {
+              "max-size": "100m"
+            },
+            "storage-driver": "overlay2"
+          }
+
+    - name: reload daemon
+      shell: systemctl daemon-reload
+
+    - name: restart Docker
+      shell: systemctl restart docker
+
+    - name: enable Docker
+      shell: systemctl enable docker
+
+    - name: enable systemd as cgroupdriver
+      blockinfile:
+        path: /etc/containerd/config.toml
+        insertafter: "#   limitations under the License."
+        block: |
+          plugins.cri.systemd_cgroup = true
+
+    - name: enable kubelet
+      shell: systemctl enable kubelet
+
+    - name: pull images
+      shell: kubeadm config images pull
+
+    - pause: seconds=300
+
+    - name: initialize node
+      shell: kubeadm init --pod-network-cidr=192.168.10.0/16 --upload-certs
+
+    - name: create .kube directory
+      file:
+        path: $HOME/.kube
+        state: directory
+        mode: 0755
+
+    - name: copy admin.conf to user's kube config
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: $HOME/.kube/config
+        remote_src: yes
+
+    - name: modify kube config ownership
+      shell: chown $(id -u):$(id -g) $HOME/.kube/config
+
+    - pause: seconds=10
+
+    - name: Download calico pluign-operator manifest to the cluster.
+      ansible.builtin.get_url:
+        url: https://docs.projectcalico.org/manifests/tigera-operator.yaml
+        dest: ~/tigera-operator.yaml
+        mode: '0664'
+
+    - name: Apply calico pluign-operator manifest to the cluster.
+      kubernetes.core.k8s:
+        state: present
+        src: ~/tigera-operator.yaml
+
+    - name: Download calico pluign-csr manifest to the cluster.
+      ansible.builtin.get_url:
+        url: https://docs.projectcalico.org/manifests/custom-resources.yaml
+        dest: ~/custom-resources.yaml
+        mode: '0664'
+
+    - name: Apply calico pluign-csr manifest to the cluster.
+      kubernetes.core.k8s:
+        state: present
+        src: ~/custom-resources.yaml
+
+    - name: Untaint Master node
+      shell: kubectl taint nodes --all node-role.kubernetes.io/master-
