@@ -1,4 +1,4 @@
-- hosts: 95.216.174.172
+- hosts: kube_nodes1
   tasks:
     - name: server update
       apt:
@@ -94,7 +94,10 @@
 
     - name: install Docker as container runtime
       apt:
-        pkg: containerd.io docker-ce docker-ce-cli
+        pkg:
+        - containerd.io
+        - docker-ce
+        - docker-ce-cli
 
     - name: create docker.service.d directory
       file:
@@ -124,11 +127,17 @@
     - name: reload daemon
       shell: systemctl daemon-reload
 
+    - pause: seconds=30
+
     - name: restart Docker
       shell: systemctl restart docker
 
+    - pause: seconds=30
+
     - name: enable Docker
       shell: systemctl enable docker
+
+    - pause: seconds=30
 
     - name: enable systemd as cgroupdriver
       blockinfile:
