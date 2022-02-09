@@ -1,4 +1,4 @@
-- hosts: kube_nodes
+- hosts: 95.216.174.172
   tasks:
     - name: server update
       apt:
