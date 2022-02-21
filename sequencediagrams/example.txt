@@ -1,0 +1,26 @@
+Nokia Edge->Artifactory: Copy SW deliverables
+Security team->Xray: define/maintain security policies
+App team->Artifactory: define/maintain watches
+Xray->Artifactory: Execute vulnerability scan
+
+opt no findings in scan
+    Artifactory->Artifactory: update properties
+    Artifactory->Git: clone helm charts, config files, etc
+end
+opt blocking findings in scan (CVSS>7, severity=HIGH,CRITICAL)
+    Xray->Xray: Generate violation
+    Xray->Security team: Notify watch recipient
+    Xray->App team: Notify watch recipient
+    Xray->JIRA: Create ticket
+    Xray->Artifactory: update properties
+    Xray->Artifactory: Block download
+end
+opt scan result need to be verified (7>CVSS>5, severity=MEDIUM)
+    Xray->Xray: Generate violation
+    Xray->Security team: Notify watch recipient
+    Xray->App team: Notify watch recipient
+    Xray->JIRA: Create ticket
+    Security team->Xray: Review scan results
+    Security team->Artifactory: Update properties (GO/NO GO)
+end
+    Virus/Malware scan->Artifactory: Scan artifacts
